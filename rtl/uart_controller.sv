@@ -1,36 +1,44 @@
 module uart_controller (
-    input logic clk_i,
-    input logic rst_i,
+    input  logic clk,
+    input  logic rst,
 
     // PC Interface
-    input  logic pc_txvalid_i, // PC has data available
-    output logic pc_rxready_o, // PC ready to accept data
-       
+    output logic [7:0] pc_data_o,
+    output logic       pc_valid_o,
+    input  logic       pc_ready_i,
+
+    input  logic [7:0] pc_data_i,
+    input  logic       pc_valid_i,
+    output logic       pc_ready_o,
+
     // UART Serial Pins
-    input  logic rxd_i, // UART RX serial line
-    output logic txd_o  // UART TX serial line
+    input  logic rxd,
+    output logic txd,
+
+    // Config
+    input  logic [15:0] prescale
 );
-    logic [7:0] data;
-    logic rx_valid;
-    
+
     // UART Receiver
     uart_rx uart_rx_inst (
-        .clk_i   (clk_i),
-        .rst_i   (rst_i),
-        .rxd_i   (rxd_i),
-        .data_o  (data), // received byte
-        .valid_o (rx_valid), // byte is valid
-        .ready_i (pc_txvalid_i) // controller/PC ready to take byte
+        .clk(clk),
+        .rst(rst),
+        .m_axis_tdata (pc_data_o),
+        .m_axis_tvalid(pc_valid_o),
+        .m_axis_tready(pc_ready_i),
+        .rxd(rxd),
+        .prescale(prescale)
     );
 
     // UART Transmitter 
     uart_tx uart_tx_inst (
-        .clk_i   (clk_i),
-        .rst_i   (rst_i),
-        .data_i  (data), // byte to transmit
-        .valid_i (rx_valid), // request to send
-        .ready_o (pc_rxready_o), // UART ready for new byte
-        .txd_o   (txd_o)
+        .clk(clk),
+        .rst(rst),
+        .s_axis_tdata (pc_data_i),
+        .s_axis_tvalid(pc_valid_i),
+        .s_axis_tready(pc_ready_o),
+        .txd(txd),
+        .prescale(prescale)
     );
 
 endmodule
