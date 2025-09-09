@@ -1,4 +1,4 @@
-module tb_uart;
+module uart_controller_tb;
     logic clk, rst;
 
     // DUT signals
@@ -49,7 +49,7 @@ module tb_uart;
     // Testbench driver: send bytes into RX
     initial begin
         $dumpfile("dump.vcd");
-        $dumpvars(0, tb_uart);
+        $dumpvars(0, uart_controller_tb);
 
         wait(!rst);
 
