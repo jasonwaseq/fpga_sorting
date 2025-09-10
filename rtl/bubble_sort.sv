@@ -50,7 +50,7 @@ module bubble_sort #(parameter N = 8) // Parameterizable array size (default 8)
                 // ----------------------
                 SORT: begin
                     if (i < N-1) begin
-                        if (j < N-i-1) begin
+                        if (j < N-i-1) begin  
                             // Compare adjacent elements
                             if (arr[j] > arr[j+1]) begin
                                 // Swap if out of order
