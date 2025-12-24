@@ -38,13 +38,9 @@ module ram_1r1w_sync
   assign rd_data_o = rd_data_l;
 
    initial begin
-      // Display depth and width (You will need to match these in your init file)
       $display("%m: depth_p is %d, width_p is %d", depth_p, width_p);
-      // wire [bar:0] foo [baz:0];
-      // In order to get the memory contents in iverilog you need to run this for loop during initialization:
       for (int i = 0; i < depth_p; i++) begin
         $dumpvars(0, ram[i]);
-        ;
       end
    end
 

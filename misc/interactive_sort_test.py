@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Interactive FPGA Radix Sorter Hardware Test
-
+Usage: python3 interactive_sort_test.py /dev/ttyUSBX
 This script allows users to input numbers (0-1023) to be sorted by the FPGA.
 It communicates via UART using the custom protocol:
   - 2-byte little-endian length header
@@ -126,17 +126,21 @@ class FPGASorterTester:
         # Display input
         print(f"Input:  {values}")
 
-        # Send to FPGA
+        # Send to FPGA and start timing
+        start_time = time.perf_counter()
         if not self.send_sort_request(values):
             return False
 
         # Receive result
         sorted_values = self.receive_sorted_values(len(values))
+        elapsed_time = time.perf_counter() - start_time
+        
         if sorted_values is None:
             return False
 
         # Display result
         print(f"Output: {sorted_values}")
+        print(f"⏱️  Sort time: {elapsed_time*1000:.2f} ms ({len(values)} values)")
 
         # Verify correctness
         expected = sorted(values)

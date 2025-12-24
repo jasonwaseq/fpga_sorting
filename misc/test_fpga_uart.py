@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test UART communication with FPGA radix sorter.
-Usage: python3 test_fpga_uart.py /dev/ttyUSB0
+Usage: python3 test_fpga_uart.py /dev/ttyUSBX
 """
 import serial
 import sys
@@ -50,12 +50,14 @@ def test_sort(ser, values, test_name, pace_ms=0):
         ser.reset_input_buffer()
         ser.reset_output_buffer()
         
-        # Send data
+        # Send data and start timing
+        start_time = time.perf_counter()
         ser.write(payload)
         ser.flush()
+    else:
+        start_time = time.perf_counter()
     
     # Read response length
-    time.sleep(0.1)  # Small delay for processing
     resp_len_bytes = ser.read(2)
     
     if len(resp_len_bytes) < 2:
@@ -73,8 +75,8 @@ def test_sort(ser, values, test_name, pace_ms=0):
     expected_bytes = out_len * 2
     # Read robustly until we have all bytes or hit a time limit
     rx_chunks = bytearray()
-    start_time = time.time()
-    while len(rx_chunks) < expected_bytes and (time.time() - start_time) < 5.0:
+    read_start = time.time()
+    while len(rx_chunks) < expected_bytes and (time.time() - read_start) < 5.0:
         need = expected_bytes - len(rx_chunks)
         chunk = ser.read(need)
         if chunk:
@@ -84,12 +86,15 @@ def test_sort(ser, values, test_name, pace_ms=0):
             time.sleep(0.01)
     rx_data = bytes(rx_chunks)
     
+    elapsed_time = time.perf_counter() - start_time
+    
     if len(rx_data) < expected_bytes:
         print(f"❌ ERROR: Incomplete data (got {len(rx_data)}/{expected_bytes} bytes)")
         print(f"Received: {rx_data.hex() if rx_data else 'NOTHING'}")
         return False
     
     print(f"Received {len(rx_data)} bytes: {rx_data.hex()}")
+    print(f"⏱️  Sort time: {elapsed_time*1000:.2f} ms ({len(values)} values)")
     
     # Decode values
     output_values = []

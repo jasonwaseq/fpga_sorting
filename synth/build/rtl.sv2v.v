@@ -67,60 +67,67 @@ module uart_sort_bridge (
 	input wire [7:0] rx_data_i;
 	input wire rx_valid_i;
 	output reg rx_ready_o;
-	output reg [7:0] tx_data_o;
-	output reg tx_valid_o;
+	output wire [7:0] tx_data_o;
+	output wire tx_valid_o;
 	input wire tx_ready_i;
 	output wire busy_o;
 	reg [1:0] state_r;
 	reg [1:0] state_n;
-	reg [1:0] state_prev_r;
 	reg [15:0] length_r;
 	reg length_valid_r;
 	reg [17:0] output_byte_count_r;
 	reg [17:0] output_bytes_sent_r;
-	reg header_done_r;
-	reg header_queued_r;
+	reg header_sent_r;
 	reg [7:0] input_low_byte_r;
 	reg [15:0] input_count_r;
+	reg output_byte_phase_r;
+	reg [VALUE_WIDTH - 1:0] output_value_hold_r;
 	reg start_pulse_r;
 	reg [3:0] start_hold_r;
 	wire start_pulse;
-	localparam signed [31:0] FIFO_DEPTH = 16;
-	localparam signed [31:0] FIFO_AW = 4;
-	reg [VALUE_WIDTH - 1:0] fifo_mem [0:15];
-	reg [3:0] fifo_wr_ptr;
-	reg [3:0] fifo_rd_ptr;
-	reg [FIFO_AW:0] fifo_count;
-	wire fifo_full;
-	wire fifo_empty;
-	wire fifo_out_valid;
-	wire [VALUE_WIDTH - 1:0] fifo_out_value;
-	assign fifo_full = fifo_count == FIFO_DEPTH;
-	assign fifo_empty = fifo_count == 0;
-	assign fifo_out_valid = !fifo_empty;
-	assign fifo_out_value = fifo_mem[fifo_rd_ptr];
-	wire [VALUE_WIDTH - 1:0] sorter_input_value;
+	reg [VALUE_WIDTH - 1:0] in_fifo_data;
+	reg in_fifo_valid;
+	wire in_fifo_ready;
+	wire [VALUE_WIDTH - 1:0] in_fifo_out;
+	wire in_fifo_out_valid;
+	wire in_fifo_out_ready;
+	reg [7:0] out_fifo_data;
+	reg out_fifo_valid;
+	wire out_fifo_ready;
+	wire [7:0] out_fifo_out;
+	wire out_fifo_out_valid;
+	wire out_fifo_out_ready;
 	wire [VALUE_WIDTH - 1:0] sorter_output_value;
 	wire sorter_output_valid;
 	wire sorter_input_ready;
-	localparam signed [31:0] OUT_FIFO_DEPTH = 64;
-	localparam signed [31:0] OUT_FIFO_AW = 6;
-	reg [7:0] out_fifo_mem [0:63];
-	reg [5:0] out_wr_ptr;
-	reg [5:0] out_rd_ptr;
-	reg [OUT_FIFO_AW:0] out_count;
-	reg [5:0] out_wr_ptr_t;
-	reg [5:0] out_rd_ptr_t;
-	reg [OUT_FIFO_AW:0] out_count_t;
-	reg [5:0] tmp_wr_ptr;
-	reg [OUT_FIFO_AW:0] tmp_count;
-	wire out_fifo_full;
-	wire out_fifo_empty;
-	assign out_fifo_full = out_count == OUT_FIFO_DEPTH;
-	assign out_fifo_empty = out_count == 0;
-	assign sorter_input_value = fifo_out_value;
 	assign busy_o = state_r != 2'd0;
 	assign start_pulse = start_pulse_r | (|start_hold_r);
+	fifo_1r1w #(
+		.width_p(VALUE_WIDTH),
+		.depth_log2_p(4)
+	) input_fifo(
+		.clk_i(clk_i),
+		.reset_i(reset_i),
+		.data_i(in_fifo_data),
+		.valid_i(in_fifo_valid),
+		.ready_o(in_fifo_ready),
+		.data_o(in_fifo_out),
+		.valid_o(in_fifo_out_valid),
+		.ready_i(in_fifo_out_ready)
+	);
+	fifo_1r1w #(
+		.width_p(8),
+		.depth_log2_p(8)
+	) output_fifo(
+		.clk_i(clk_i),
+		.reset_i(reset_i),
+		.data_i(out_fifo_data),
+		.valid_i(out_fifo_valid),
+		.ready_o(out_fifo_ready),
+		.data_o(out_fifo_out),
+		.valid_o(out_fifo_out_valid),
+		.ready_i(out_fifo_out_ready)
+	);
 	radix_sorter #(
 		.VALUE_WIDTH(VALUE_WIDTH),
 		.COUNT_WIDTH(COUNT_WIDTH)
@@ -129,15 +136,19 @@ module uart_sort_bridge (
 		.reset_i(reset_i),
 		.start_i(start_pulse),
 		.length_i(length_r),
-		.value_i(sorter_input_value),
-		.value_valid_i(fifo_out_valid && sorter_input_ready),
+		.value_i(in_fifo_out),
+		.value_valid_i(in_fifo_out_valid),
 		.value_ready_o(sorter_input_ready),
 		.sorted_value_o(sorter_output_value),
 		.sorted_valid_o(sorter_output_valid),
-		.sorted_ready_i((state_r == 2'd3) && (out_count <= 62)),
+		.sorted_ready_i((((state_r == 2'd3) && !output_byte_phase_r) && sorter_output_valid) && !out_fifo_valid),
 		.busy_o(),
 		.done_o()
 	);
+	assign in_fifo_out_ready = sorter_input_ready;
+	assign tx_data_o = out_fifo_out;
+	assign tx_valid_o = out_fifo_out_valid;
+	assign out_fifo_out_ready = tx_ready_i;
 	always @(*) begin
 		state_n = state_r;
 		rx_ready_o = 1'b0;
@@ -149,7 +160,7 @@ module uart_sort_bridge (
 			end
 			2'd1: begin
 				rx_ready_o = 1'b1;
-				if (length_valid_r && header_done_r) begin
+				if (length_valid_r && header_sent_r) begin
 					if (length_r == 16'd0)
 						state_n = 2'd3;
 					else
@@ -157,14 +168,12 @@ module uart_sort_bridge (
 				end
 			end
 			2'd2: begin
-				rx_ready_o = !fifo_full;
-				if ((length_r == 16'd0) && header_done_r)
-					state_n = 2'd3;
-				else if (input_count_r >= (length_r << 1))
+				rx_ready_o = in_fifo_ready;
+				if (input_count_r >= (length_r << 1))
 					state_n = 2'd3;
 			end
 			2'd3:
-				if (((output_bytes_sent_r >= output_byte_count_r) && !tx_valid_o) && out_fifo_empty)
+				if ((output_bytes_sent_r >= output_byte_count_r) && !out_fifo_out_valid)
 					state_n = 2'd0;
 			default: state_n = 2'd0;
 		endcase
@@ -175,43 +184,34 @@ module uart_sort_bridge (
 			length_r <= 1'sb0;
 			output_byte_count_r <= 1'sb0;
 			output_bytes_sent_r <= 1'sb0;
-			header_done_r <= 1'b0;
-			header_queued_r <= 1'b0;
+			header_sent_r <= 1'b0;
 			length_valid_r <= 1'b0;
 			input_low_byte_r <= 1'sb0;
 			input_count_r <= 1'sb0;
 			start_pulse_r <= 1'b0;
 			start_hold_r <= 1'sb0;
-			tx_data_o <= 1'sb0;
-			tx_valid_o <= 1'b0;
-			fifo_wr_ptr <= 1'sb0;
-			fifo_rd_ptr <= 1'sb0;
-			fifo_count <= 1'sb0;
-			out_wr_ptr <= 1'sb0;
-			out_rd_ptr <= 1'sb0;
-			out_count <= 1'sb0;
+			in_fifo_data <= 1'sb0;
+			in_fifo_valid <= 1'b0;
+			out_fifo_data <= 1'sb0;
+			out_fifo_valid <= 1'b0;
+			output_byte_phase_r <= 1'b0;
+			output_value_hold_r <= 1'sb0;
 		end
 		else begin
-			out_wr_ptr_t = out_wr_ptr;
-			out_rd_ptr_t = out_rd_ptr;
-			out_count_t = out_count;
-			tmp_wr_ptr = 1'sb0;
-			tmp_count = 1'sb0;
-			state_prev_r <= state_r;
 			state_r <= state_n;
 			start_pulse_r <= 1'b0;
+			in_fifo_valid <= 1'b0;
+			if (out_fifo_valid && out_fifo_ready)
+				out_fifo_valid <= 1'b0;
 			if (start_hold_r != {4 {1'sb0}})
 				start_hold_r <= start_hold_r - 1'b1;
 			case (state_r)
 				2'd0: begin
 					input_count_r <= 1'sb0;
 					output_bytes_sent_r <= 1'sb0;
-					header_done_r <= 1'b0;
-					header_queued_r <= 1'b0;
+					header_sent_r <= 1'b0;
 					length_valid_r <= 1'b0;
-					out_wr_ptr <= 1'sb0;
-					out_rd_ptr <= 1'sb0;
-					out_count <= 1'sb0;
+					output_byte_phase_r <= 1'b0;
 					if (rx_valid_i && rx_ready_o)
 						length_r[7:0] <= rx_data_i;
 				end
@@ -223,20 +223,21 @@ module uart_sort_bridge (
 					if (rx_valid_i && rx_ready_o) begin
 						length_r[15:8] <= rx_data_i;
 						output_byte_count_r <= 18'h00002 + ({rx_data_i, length_r[7:0]} << 1);
-						if (!header_queued_r && !out_fifo_full) begin
-							tmp_wr_ptr = out_wr_ptr_t;
-							tmp_count = out_count_t;
-							out_fifo_mem[tmp_wr_ptr] <= length_r[7:0];
-							tmp_wr_ptr = tmp_wr_ptr + 1'b1;
-							tmp_count = tmp_count + 1'b1;
-							out_fifo_mem[tmp_wr_ptr] <= rx_data_i;
-							tmp_wr_ptr = tmp_wr_ptr + 1'b1;
-							tmp_count = tmp_count + 1'b1;
-							out_wr_ptr_t = tmp_wr_ptr;
-							out_count_t = tmp_count;
-							header_queued_r <= 1'b1;
-							header_done_r <= 1'b1;
-							length_valid_r <= 1'b1;
+						length_valid_r <= 1'b1;
+					end
+					if (length_valid_r && !header_sent_r) begin
+						if (!output_byte_phase_r) begin
+							if (out_fifo_ready) begin
+								out_fifo_data <= length_r[7:0];
+								out_fifo_valid <= 1'b1;
+								output_byte_phase_r <= 1'b1;
+							end
+						end
+						else if (out_fifo_ready) begin
+							out_fifo_data <= length_r[15:8];
+							out_fifo_valid <= 1'b1;
+							output_byte_phase_r <= 1'b0;
+							header_sent_r <= 1'b1;
 						end
 					end
 				end
@@ -245,47 +246,30 @@ module uart_sort_bridge (
 						input_count_r <= input_count_r + 1'b1;
 						if (input_count_r[0] == 1'b0)
 							input_low_byte_r <= rx_data_i;
-						else if (!fifo_full) begin
-							fifo_mem[fifo_wr_ptr] <= {rx_data_i[1:0], input_low_byte_r};
-							fifo_wr_ptr <= fifo_wr_ptr + 1'b1;
-							fifo_count <= fifo_count + 1'b1;
+						else begin
+							in_fifo_data <= {rx_data_i[1:0], input_low_byte_r};
+							in_fifo_valid <= 1'b1;
 						end
 					end
 				2'd3:
-					if (sorter_output_valid && (out_count_t <= 62)) begin
-						tmp_wr_ptr = out_wr_ptr_t;
-						tmp_count = out_count_t;
-						out_fifo_mem[tmp_wr_ptr] <= sorter_output_value[7:0];
-						tmp_wr_ptr = tmp_wr_ptr + 1'b1;
-						tmp_count = tmp_count + 1'b1;
-						out_fifo_mem[tmp_wr_ptr] <= {6'd0, sorter_output_value[VALUE_WIDTH - 1:8]};
-						tmp_wr_ptr = tmp_wr_ptr + 1'b1;
-						tmp_count = tmp_count + 1'b1;
-						out_wr_ptr_t = tmp_wr_ptr;
-						out_count_t = tmp_count;
+					if (!output_byte_phase_r) begin
+						if (sorter_output_valid && !out_fifo_valid) begin
+							output_value_hold_r <= sorter_output_value;
+							out_fifo_data <= sorter_output_value[7:0];
+							out_fifo_valid <= 1'b1;
+							output_byte_phase_r <= 1'b1;
+						end
+					end
+					else if (!out_fifo_valid) begin
+						out_fifo_data <= {6'd0, output_value_hold_r[VALUE_WIDTH - 1:8]};
+						out_fifo_valid <= 1'b1;
+						output_byte_phase_r <= 1'b0;
 					end
 				default:
 					;
 			endcase
-			if (fifo_out_valid && sorter_input_ready) begin
-				fifo_rd_ptr <= fifo_rd_ptr + 1'b1;
-				if (fifo_count != 0)
-					fifo_count <= fifo_count - 1'b1;
-			end
-			if (!tx_valid_o && !out_fifo_empty) begin
-				tx_data_o <= out_fifo_mem[out_rd_ptr];
-				tx_valid_o <= 1'b1;
-			end
-			else if (tx_valid_o && tx_ready_i) begin
-				tx_valid_o <= 1'b0;
-				out_rd_ptr_t = out_rd_ptr_t + 1'b1;
-				if (out_count_t != 0)
-					out_count_t = out_count_t - 1'b1;
+			if (out_fifo_out_valid && tx_ready_i)
 				output_bytes_sent_r <= output_bytes_sent_r + 1'b1;
-			end
-			out_wr_ptr <= out_wr_ptr_t;
-			out_rd_ptr <= out_rd_ptr_t;
-			out_count <= out_count_t;
 		end
 endmodule
 module radix_sorter (
@@ -494,6 +478,78 @@ module radix_sorter (
 			endcase
 		end
 	initial _sv2v_0 = 0;
+endmodule
+module fifo_1r1w (
+	clk_i,
+	reset_i,
+	data_i,
+	ready_i,
+	valid_i,
+	ready_o,
+	valid_o,
+	data_o
+);
+	parameter [31:0] width_p = 8;
+	parameter [31:0] depth_log2_p = 8;
+	input [0:0] clk_i;
+	input [0:0] reset_i;
+	input [width_p - 1:0] data_i;
+	input [0:0] ready_i;
+	input [0:0] valid_i;
+	output wire [0:0] ready_o;
+	output wire [0:0] valid_o;
+	output wire [width_p - 1:0] data_o;
+	reg [depth_log2_p:0] wr_ptr;
+	reg [depth_log2_p:0] rd_ptr;
+	wire wr_en;
+	assign wr_en = valid_i & ready_o;
+	wire rd_en;
+	assign rd_en = valid_o & ready_i;
+	wire [0:0] full;
+	assign full = (wr_ptr[depth_log2_p] ^ rd_ptr[depth_log2_p]) && (wr_ptr[depth_log2_p - 1:0] == rd_ptr[depth_log2_p - 1:0]);
+	wire [0:0] empty;
+	assign empty = ~(wr_ptr[depth_log2_p] ^ rd_ptr[depth_log2_p]) && (wr_ptr[depth_log2_p - 1:0] == rd_ptr[depth_log2_p - 1:0]);
+	assign ready_o = ~full;
+	assign valid_o = ~empty;
+	wire [width_p - 1:0] rd_data_l;
+	wire [depth_log2_p:0] mux;
+	assign mux = (rd_en ? rd_ptr + 1 : rd_ptr);
+	ram_1r1w_sync #(
+		.width_p(width_p),
+		.depth_p(1 << depth_log2_p),
+		.filename_p("")
+	) ram_inst(
+		.clk_i(clk_i),
+		.reset_i(reset_i),
+		.wr_valid_i(wr_en),
+		.wr_data_i(data_i),
+		.wr_addr_i(wr_ptr[depth_log2_p - 1:0]),
+		.rd_valid_i(1'b1),
+		.rd_addr_i(mux[depth_log2_p - 1:0]),
+		.rd_data_o(rd_data_l)
+	);
+	reg [0:0] trail;
+	reg [width_p - 1:0] data_l;
+	reg [0:0] firstwrite;
+	always @(posedge clk_i)
+		if (reset_i) begin
+			wr_ptr <= 1'sb0;
+			rd_ptr <= 1'sb0;
+			data_l <= 1'sb0;
+			trail <= 1'sb0;
+			firstwrite <= 1'sb0;
+		end
+		else begin
+			if (wr_en) begin
+				wr_ptr <= wr_ptr + 1;
+				data_l <= data_i;
+			end
+			if (rd_en)
+				rd_ptr <= rd_ptr + 1;
+			firstwrite <= (wr_en & empty) | (firstwrite & rd_en);
+			trail <= (mux == wr_ptr) & rd_en;
+		end
+	assign data_o = (firstwrite | trail ? data_l : rd_data_l);
 endmodule
 module ram_1r1w_sync (
 	clk_i,

@@ -1,4 +1,3 @@
-// Top-level module with UART
 `timescale 1ns/1ps
 module top (
     input  logic clk,
@@ -55,11 +54,5 @@ module top (
         .tx_ready_i(tx_ready),
         .busy_o()
     );
-
-    // Debug: simple heartbeat toggle on txd to verify clock is running
-    // Comment out once UART works
-    // logic [23:0] hb_cnt;
-    // always_ff @(posedge clk) hb_cnt <= hb_cnt + 1'b1;
-    // assign txd = hb_cnt[23];  // Toggle every ~5.5M cycles (~0.46 Hz at 12 MHz)
 
 endmodule
