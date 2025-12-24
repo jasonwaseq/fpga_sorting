@@ -60,6 +60,7 @@ module uart_sort_bridge (
 	tx_ready_i,
 	busy_o
 );
+	reg _sv2v_0;
 	parameter signed [31:0] VALUE_WIDTH = 10;
 	parameter signed [31:0] COUNT_WIDTH = 16;
 	input wire clk_i;
@@ -150,6 +151,8 @@ module uart_sort_bridge (
 	assign tx_valid_o = out_fifo_out_valid;
 	assign out_fifo_out_ready = tx_ready_i;
 	always @(*) begin
+		if (_sv2v_0)
+			;
 		state_n = state_r;
 		rx_ready_o = 1'b0;
 		case (state_r)
@@ -271,6 +274,7 @@ module uart_sort_bridge (
 			if (out_fifo_out_valid && tx_ready_i)
 				output_bytes_sent_r <= output_bytes_sent_r + 1'b1;
 		end
+	initial _sv2v_0 = 0;
 endmodule
 module radix_sorter (
 	clk_i,

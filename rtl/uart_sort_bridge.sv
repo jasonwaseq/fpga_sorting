@@ -117,7 +117,7 @@ module uart_sort_bridge #(
     assign tx_valid_o = out_fifo_out_valid;
     assign out_fifo_out_ready = tx_ready_i;
 
-    always @(*) begin
+    always_comb begin
         state_n = state_r;
         rx_ready_o = 1'b0;
 
