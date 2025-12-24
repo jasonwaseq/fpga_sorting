@@ -1,0 +1,5 @@
+
+# iCEBreaker Physical Constraints for FPGA Sorter
+set_io clk 35         # 12 MHz clock
+set_io rxd 6          # RS232 RX
+set_io txd 9          # RS232 TX

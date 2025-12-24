@@ -1,70 +1,63 @@
-TOP := tb
-RTL_TOP := uart_comm
+.PHONY: lint synth clean_synth clean
 
-export YOSYS_DATDIR := $(shell yosys-config --datdir)
-export ALEX_UART_DIR = $(abspath third_party/verilog-uart)
+# Lint the RTL
+lint:
+	verilator lint.vlt -f rtl/rtl.f --lint-only --top top
 
-RTL := $(shell \
- YOSYS_DATDIR=$(YOSYS_DATDIR) \
- python3 misc/convert_filelist.py Makefile rtl/rtl.f \
-)
+# Synthesize for iCEBreaker
+synth: synth/icestorm_icebreaker/build/icebreaker.bit
 
-SV2V_ARGS := $(shell \
- python3 misc/convert_filelist.py sv2v rtl/rtl.f \
-)
+# Build UART echo bitstream (top_uart_echo)
+.PHONY: synth-echo
+synth-echo: synth/icestorm_icebreaker/build/icebreaker_echo.bit
 
-
-.PHONY: lint sim synth clean
-
-lint: 
-	verilator lint.vlt -f rtl/rtl.f -f dv/dv.f --lint-only --top $(RTL_TOP)
-
-sim: 
-	verilator lint.vlt --Mdir ${TOP}_$@_dir -f rtl/rtl.f -f dv/dv.f --binary --top ${TOP}
-	./${TOP}_$@_dir/V${TOP} +verilator+rand+reset+2
-
-gls: synth/yosys_generic/build/synth.v
-	verilator lint.vlt --Mdir ${TOP}_$@_dir -f synth/yosys_generic/gls.f -f dv/dv.f --binary -Wno-fatal --top ${TOP}
-	./${TOP}_$@_dir/V${TOP} +verilator+rand+reset+2
-
-gls_xc7: synth/yosys_xc7/build/xc7.v
-	verilator lint.vlt --Mdir ${TOP}_$@_dir -f synth/yosys_xc7/gls_xc7.f -f dv/dv.f --binary --top ${TOP}
-	./${TOP}_$@_dir/V${TOP} +verilator+rand+reset+2
-
-synth/build/rtl.sv2v.v: ${RTL}
+synth/build/rtl.sv2v.v: rtl/rtl.f
 	mkdir -p $(dir $@)
-	sv2v ${RTL} -w $@ -DSYNTHESIS
+	sv2v $$(cat rtl/rtl.f) -w $@ -DSYNTHESIS
 
-synth/yosys_generic/build/synth.v: synth/build/rtl.sv2v.v synth/yosys_generic/yosys.tcl ${MEMS}
-	mkdir -p $(dir $@)
-	yosys -p 'tcl synth/yosys_generic/yosys.tcl synth/build/rtl.sv2v.v' -l synth/yosys_generic/build/yosys.log
-
-icestorm_icebreaker_gls: synth/icestorm_icebreaker/build/synth.v
-	verilator lint.vlt --Mdir ${TOP}_$@_dir -f synth/icestorm_icebreaker/gls.f -f dv/dv.f --binary -Wno-fatal --top ${TOP}
-	./${TOP}_$@_dir/V${TOP} +verilator+rand+reset+2
-
-synth/icestorm_icebreaker/build/synth.v synth/icestorm_icebreaker/build/synth.json: synth/build/rtl.sv2v.v synth/icestorm_icebreaker/icebreaker.v synth/icestorm_icebreaker/yosys.tcl
+synth/icestorm_icebreaker/build/synth.json: synth/build/rtl.sv2v.v synth/icestorm_icebreaker/yosys.tcl
 	mkdir -p $(dir $@)
 	yosys -p 'tcl synth/icestorm_icebreaker/yosys.tcl' -l synth/icestorm_icebreaker/build/yosys.log
 
-synth/icestorm_icebreaker/build/icebreaker.asc: synth/icestorm_icebreaker/build/synth.json synth/icestorm_icebreaker/icebreaker.py synth/icestorm_icebreaker/icebreaker.pcf
+synth/icestorm_icebreaker/build/icebreaker.asc: synth/icestorm_icebreaker/build/synth.json synth/icestorm_icebreaker/icebreaker.pcf
 	nextpnr-ice40 \
-	 --json synth/icestorm_icebreaker/build/synth.json \
-	 --up5k \
-	 --package sg48 \
-	 --pre-pack synth/icestorm_icebreaker/icebreaker.py \
-	 --pcf synth/icestorm_icebreaker/icebreaker.pcf \
-	 --asc $@
+	  --json synth/icestorm_icebreaker/build/synth.json \
+	  --up5k \
+	  --package sg48 \
+	  --pcf synth/icestorm_icebreaker/icebreaker.pcf \
+	  --asc synth/icestorm_icebreaker/build/icebreaker.asc
 
-%.bit: %.asc
-	icepack $< $@
+synth/icestorm_icebreaker/build/icebreaker.bit: synth/icestorm_icebreaker/build/icebreaker.asc
+	icepack synth/icestorm_icebreaker/build/icebreaker.asc synth/icestorm_icebreaker/build/icebreaker.bit
 
-clean:
-	rm -rf \
-	 *.memh *.memb \
-	 *sim_dir *gls_dir \
-	 dump.vcd dump.fst \
-	 synth/build \
-	 synth/yosys_generic/build \
-	 synth/icestorm_icebreaker/build \
-	 synth/vivado_basys3/build
+# Echo flow
+synth/icestorm_icebreaker/build/synth_echo.json: synth/build/rtl.sv2v.v synth/icestorm_icebreaker/yosys_echo.tcl
+	mkdir -p $(dir $@)
+	yosys -p 'tcl synth/icestorm_icebreaker/yosys_echo.tcl' -l synth/icestorm_icebreaker/build/yosys_echo.log
+
+synth/icestorm_icebreaker/build/icebreaker_echo.asc: synth/icestorm_icebreaker/build/synth_echo.json synth/icestorm_icebreaker/icebreaker.pcf
+	nextpnr-ice40 \
+	  --json synth/icestorm_icebreaker/build/synth_echo.json \
+	  --up5k \
+	  --package sg48 \
+	  --pcf synth/icestorm_icebreaker/icebreaker.pcf \
+	  --asc synth/icestorm_icebreaker/build/icebreaker_echo.asc
+
+synth/icestorm_icebreaker/build/icebreaker_echo.bit: synth/icestorm_icebreaker/build/icebreaker_echo.asc
+	icepack synth/icestorm_icebreaker/build/icebreaker_echo.asc synth/icestorm_icebreaker/build/icebreaker_echo.bit
+
+# Convenience: build + flash sorter
+.PHONY: run-sorter
+run-sorter: synth/icestorm_icebreaker/build/icebreaker.bit
+	iceprog synth/icestorm_icebreaker/build/icebreaker.bit
+
+# Convenience: build + flash echo
+.PHONY: run-echo
+run-echo: synth/icestorm_icebreaker/build/icebreaker_echo.bit
+	iceprog synth/icestorm_icebreaker/build/icebreaker_echo.bit
+
+clean_synth:
+	rm -rf synth/build synth/icestorm_icebreaker/build
+
+clean: clean_synth
+	rm -rf *.log *.rpt
